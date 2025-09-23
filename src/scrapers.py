@@ -1,6 +1,7 @@
 import time
 import re
 from typing import List, Tuple, Optional
+import csv
 
 import pandas as pd
 from selenium.webdriver.common.by import By
@@ -221,6 +222,74 @@ def navigate_to_page(pagination_select: Select, page_number: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def scrape_all_pages_progressive(driver, output_path: str, max_pages: Optional[int] = None) -> int:
+    """
+    Scrape all pages of holdings data and write to CSV progressively.
+    Returns the total number of holdings scraped.
+    
+    Args:
+        driver: Selenium WebDriver instance
+        output_path: Path to write the CSV file
+        max_pages: Maximum number of pages to scrape (None for all pages)
+    """
+    total_holdings = 0
+    
+    # Initialize CSV file with headers
+    with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["Ticker", "% of fund"])
+    
+    # Get pagination select
+    pagination_select = get_pagination_select(driver)
+    if not pagination_select:
+        # No pagination, just scrape current page
+        found = find_holdings_table(driver)
+        if found:
+            headers, rows = found
+            page_holdings = parse_ticker_weight(headers, rows)
+            if page_holdings:
+                with open(output_path, 'a', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerows(page_holdings)
+                total_holdings = len(page_holdings)
+        return total_holdings
+    
+    total_pages = get_total_pages(pagination_select)
+    if max_pages:
+        total_pages = min(total_pages, max_pages)
+    print(f"Found {get_total_pages(pagination_select)} total pages, will scrape {total_pages} pages")
+    
+    # Scrape each page and write progressively
+    for page_num in range(1, total_pages + 1):
+        print(f"Scraping page {page_num}/{total_pages}...")
+        
+        # Navigate to page
+        if not navigate_to_page(pagination_select, page_num):
+            print(f"Failed to navigate to page {page_num}")
+            continue
+        
+        # Find and parse holdings table
+        found = find_holdings_table(driver)
+        if found:
+            headers, rows = found
+            page_holdings = parse_ticker_weight(headers, rows)
+            if page_holdings:
+                # Append to CSV immediately
+                with open(output_path, 'a', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerows(page_holdings)
+                total_holdings += len(page_holdings)
+                print(f"Found {len(page_holdings)} holdings on page {page_num}, written to CSV")
+        else:
+            print(f"No holdings table found on page {page_num}")
+        
+        # Small delay between pages
+        time.sleep(1)
+    
+    print(f"Total holdings collected and saved: {total_holdings}")
+    return total_holdings
 
 
 def scrape_all_pages(driver, max_pages: Optional[int] = None) -> List[Tuple[str, str]]:

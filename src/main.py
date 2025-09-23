@@ -5,8 +5,7 @@ from scrapers import (
     ensure_on_holdings_section,
     find_holdings_table,
     parse_ticker_weight,
-    save_csv,
-    scrape_all_pages,
+    scrape_all_pages_progressive,
 )
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -28,7 +27,9 @@ def main():
         "--headful", action="store_true", help="Show browser window (default headless)."
     )
     parser.add_argument(
-        "--single-page", action="store_true", help="Only scrape the first page (for testing)."
+        "--single-page",
+        action="store_true",
+        help="Only scrape the first page (for testing).",
     )
     parser.add_argument(
         "--max-pages", type=int, help="Maximum number of pages to scrape (for testing)."
@@ -79,14 +80,16 @@ def main():
                     "Table found, but no rows with Ticker/% of fund extracted."
                 )
         else:
-            # New multi-page scraping logic
-            data = scrape_all_pages(driver, max_pages=args.max_pages)
-            if not data:
-                raise RuntimeError(
-                    "Could not scrape any holdings data from any pages."
-                )
-
-        save_csv(data, args.out)
+            # multi-page scraping logic with progressive CSV writing
+            total_holdings = scrape_all_pages_progressive(
+                driver, args.out, max_pages=args.max_pages
+            )
+            if total_holdings == 0:
+                raise RuntimeError("Could not scrape any holdings data from any pages.")
+            print(
+                f"Scraping completed successfully. {total_holdings} holdings saved to {args.out}"
+            )
+            return  # Early return since CSV is already written
 
     finally:
         driver.quit()
