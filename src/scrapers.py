@@ -6,6 +6,7 @@ import pandas as pd
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import Select
 
 
 VANGUARD_DEFAULT_URL = (
@@ -165,6 +166,113 @@ def parse_ticker_weight(
 
         extracted.append((ticker, weight))
     return extracted
+
+
+def get_pagination_select(driver) -> Optional[Select]:
+    """
+    Find and return the pagination select element.
+    Returns None if not found.
+    """
+    try:
+        select_element = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "equitySelectId"))
+        )
+        return Select(select_element)
+    except Exception:
+        try:
+            select_elements = driver.find_elements(By.CSS_SELECTOR, "select[aria-label='equity']")
+            if select_elements:
+                return Select(select_elements[0])
+        except Exception:
+            pass
+    return None
+
+
+def get_total_pages(pagination_select: Select) -> int:
+    """
+    Get the total number of pages from the pagination select.
+    """
+    if not pagination_select:
+        return 1
+    
+    options = pagination_select.options
+    if not options:
+        return 1
+    
+    try:
+        last_option_text = options[-1].text
+        page_match = re.search(r'Page (\d+)', last_option_text)
+        if page_match:
+            return int(page_match.group(1))
+    except Exception:
+        pass
+    
+    return len(options)
+
+
+def navigate_to_page(pagination_select: Select, page_number: int) -> bool:
+    """
+    Navigate to a specific page using the pagination select.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        pagination_select.select_by_value(str(page_number))
+        time.sleep(2)  # Wait for page to load
+        return True
+    except Exception:
+        return False
+
+
+def scrape_all_pages(driver, max_pages: Optional[int] = None) -> List[Tuple[str, str]]:
+    """
+    Scrape all pages of holdings data.
+    Returns a list of (ticker, weight) tuples from all pages.
+    
+    Args:
+        driver: Selenium WebDriver instance
+        max_pages: Maximum number of pages to scrape (None for all pages)
+    """
+    all_holdings = []
+    
+    # Get pagination select
+    pagination_select = get_pagination_select(driver)
+    if not pagination_select:
+        # No pagination, just scrape current page
+        found = find_holdings_table(driver)
+        if found:
+            headers, rows = found
+            return parse_ticker_weight(headers, rows)
+        return []
+    
+    total_pages = get_total_pages(pagination_select)
+    if max_pages:
+        total_pages = min(total_pages, max_pages)
+    print(f"Found {get_total_pages(pagination_select)} total pages, will scrape {total_pages} pages")
+    
+    # Scrape each page
+    for page_num in range(1, total_pages + 1):
+        print(f"Scraping page {page_num}/{total_pages}...")
+        
+        # Navigate to page
+        if not navigate_to_page(pagination_select, page_num):
+            print(f"Failed to navigate to page {page_num}")
+            continue
+        
+        # Find and parse holdings table
+        found = find_holdings_table(driver)
+        if found:
+            headers, rows = found
+            page_holdings = parse_ticker_weight(headers, rows)
+            all_holdings.extend(page_holdings)
+            print(f"Found {len(page_holdings)} holdings on page {page_num}")
+        else:
+            print(f"No holdings table found on page {page_num}")
+        
+        # Small delay between pages
+        time.sleep(1)
+    
+    print(f"Total holdings collected: {len(all_holdings)}")
+    return all_holdings
 
 
 def save_csv(pairs: List[Tuple[str, str]], path: str):

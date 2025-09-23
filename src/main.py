@@ -6,6 +6,7 @@ from scrapers import (
     find_holdings_table,
     parse_ticker_weight,
     save_csv,
+    scrape_all_pages,
 )
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -25,6 +26,12 @@ def main():
     parser.add_argument("--out", default="vt_holdings.csv", help="Output CSV path")
     parser.add_argument(
         "--headful", action="store_true", help="Show browser window (default headless)."
+    )
+    parser.add_argument(
+        "--single-page", action="store_true", help="Only scrape the first page (for testing)."
+    )
+    parser.add_argument(
+        "--max-pages", type=int, help="Maximum number of pages to scrape (for testing)."
     )
     args = parser.parse_args()
 
@@ -53,22 +60,31 @@ def main():
             )
         )
 
-        found = find_holdings_table(driver)
-        if not found:
-            ensure_on_holdings_section(driver)
+        if args.single_page:
+            # Original single-page logic for testing
             found = find_holdings_table(driver)
+            if not found:
+                ensure_on_holdings_section(driver)
+                found = find_holdings_table(driver)
 
-        if not found:
-            raise RuntimeError(
-                "Could not find a holdings table with Ticker and % of fund."
-            )
+            if not found:
+                raise RuntimeError(
+                    "Could not find a holdings table with Ticker and % of fund."
+                )
 
-        headers, rows = found
-        data = parse_ticker_weight(headers, rows)
-        if not data:
-            raise RuntimeError(
-                "Table found, but no rows with Ticker/% of fund extracted."
-            )
+            headers, rows = found
+            data = parse_ticker_weight(headers, rows)
+            if not data:
+                raise RuntimeError(
+                    "Table found, but no rows with Ticker/% of fund extracted."
+                )
+        else:
+            # New multi-page scraping logic
+            data = scrape_all_pages(driver, max_pages=args.max_pages)
+            if not data:
+                raise RuntimeError(
+                    "Could not scrape any holdings data from any pages."
+                )
 
         save_csv(data, args.out)
 
